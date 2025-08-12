@@ -49,35 +49,33 @@ async fn main() {
 async fn count_path(path: impl AsRef<Path>, k: usize) -> usize {
     let path = path.as_ref();
 
-    let result = if let Ok(directory) = read_dir(path).await {
-        count_directory(directory, k).await
+    if let Ok(directory) = read_dir(path).await {
+        count_directory(path, directory, k).await
     } else if let Ok(file) = File::open(path).await {
-        count_file(file, k).await
+        count_file(path, file, k).await
     } else {
         // If everything fails, just ignore it.
         0
-    };
-
-    debug!("path {} contains {result} {k}-mers", path.display());
-    result
+    }
 }
 
 #[async_recursion]
-async fn count_directory(mut directory: ReadDir, k: usize) -> usize {
+async fn count_directory(path: &Path, mut directory: ReadDir, k: usize) -> usize {
     let mut sum = 0;
 
     while let Ok(Some(entry)) = directory.next_entry().await {
         sum += count_path(entry.path(), k).await;
     }
 
+    debug!("directory {} contains {sum} {k}-mers", path.display());
     sum
 }
 
 #[allow(clippy::manual_unwrap_or_default, clippy::manual_unwrap_or)]
-async fn count_file(mut file: impl AsyncRead + Unpin + Send, k: usize) -> usize {
-    if let Some(amount) = count_tar_file(Box::new(&mut file), k).await {
+async fn count_file(path: &Path, mut file: impl AsyncRead + Unpin + Send, k: usize) -> usize {
+    if let Some(amount) = count_tar_file(path, Box::new(&mut file), k).await {
         amount
-    } else if let Some(amount) = count_fasta_file(&mut file, k).await {
+    } else if let Some(amount) = count_fasta_file(path, &mut file, k).await {
         amount
     } else {
         // If everything fails, just ignore it.
@@ -85,32 +83,40 @@ async fn count_file(mut file: impl AsyncRead + Unpin + Send, k: usize) -> usize 
     }
 }
 
-fn count_tar_file<'file>(
-    file: Box<dyn 'file + AsyncRead + Unpin + Send>,
+fn count_tar_file<'result>(
+    path: &'result Path,
+    file: Box<dyn 'result + AsyncRead + Unpin + Send>,
     k: usize,
-) -> Pin<Box<dyn 'file + Future<Output = Option<usize>> + Send>> {
+) -> Pin<Box<dyn 'result + Future<Output = Option<usize>> + Send>> {
     Box::pin(async move {
         let mut archive = Archive::new(file);
         let Ok(mut entries) = archive.entries() else {
+            debug!("file {} is not tar", path.display());
             return None;
         };
         let mut sum = 0;
 
         while let Some(Ok(file)) = entries.next().await {
-            sum += count_file(file, k).await;
+            sum += count_file(&path.join(file.path().unwrap_or_default()), file, k).await;
         }
 
         if sum == 0 {
             // It is unclear how to discover if the file is actually a tar archive.
             // So we simply say that if the tokio-tar crate finds no file, or no file that would be fasta, then it is not a tar file.
+            debug!("file {} is not tar", path.display());
             None
         } else {
+            debug!("archive {} contains {sum} {k}-mers", path.display());
             Some(sum)
         }
     })
 }
 
-async fn count_fasta_file(file: impl AsyncRead + Unpin + Send, k: usize) -> Option<usize> {
+async fn count_fasta_file(
+    path: &Path,
+    file: impl AsyncRead + Unpin + Send,
+    k: usize,
+) -> Option<usize> {
     let mut reader = BufReader::with_capacity(1024 * 1024, file);
     let mut sum = 0;
 
@@ -130,7 +136,7 @@ async fn count_fasta_file(file: impl AsyncRead + Unpin + Send, k: usize) -> Opti
         let mut has_characters = false;
         while let Ok(b) = reader.read_u8().await {
             has_characters = true;
-            if b == b'\n' {
+            if b == b'\n' || b == b'\r' {
                 break;
             }
         }
@@ -140,7 +146,7 @@ async fn count_fasta_file(file: impl AsyncRead + Unpin + Send, k: usize) -> Opti
         }
 
         // Count entry characters.
-        let mut character_count = 0usize;
+        let mut character_count = 0;
         let mut last_is_newline = true;
         while let Ok(b) = reader.read_u8().await {
             if b == b'>' {
@@ -149,6 +155,7 @@ async fn count_fasta_file(file: impl AsyncRead + Unpin + Send, k: usize) -> Opti
                     break;
                 } else {
                     // Found entry header character  without preceding newline.
+                    debug!("file {} is not fasta", path.display());
                     return None;
                 }
             }
@@ -163,5 +170,6 @@ async fn count_fasta_file(file: impl AsyncRead + Unpin + Send, k: usize) -> Opti
         sum += character_count - k + 1;
     }
 
+    debug!("file {} contains {sum} {k}-mers", path.display());
     Some(sum)
 }
