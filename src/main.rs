@@ -158,7 +158,7 @@ async fn count_fasta_file(
         }
 
         // Count entry characters.
-        let mut character_count = 0;
+        let mut character_count = 0usize;
         let mut last_is_newline = true;
         while let Ok(b) = reader.read_u8().await {
             if b == b'>' {
@@ -179,7 +179,7 @@ async fn count_fasta_file(
             last_is_newline = b == b'\n' || b == b'\r';
         }
 
-        sum += character_count - k + 1;
+        sum += (character_count + 1).saturating_sub(k);
     }
 
     debug!("file {} contains {sum} {k}-mers", path.display());
