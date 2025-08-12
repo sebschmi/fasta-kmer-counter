@@ -18,14 +18,18 @@ struct Cli {
     k: usize,
 
     #[clap(index = 1)]
-    input: PathBuf,
+    input: Vec<PathBuf>,
 }
 
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
 
-    let total_count = count_path(&cli.input, cli.k).await;
+    let mut total_count = 0;
+    for input in &cli.input {
+        total_count += count_path(input, cli.k).await;
+    }
+
     println!("{total_count}");
 }
 
@@ -53,8 +57,8 @@ async fn count_directory(mut directory: ReadDir, k: usize) -> usize {
 }
 
 #[allow(clippy::manual_unwrap_or_default, clippy::manual_unwrap_or)]
-async fn count_file(mut file: impl AsyncRead + Unpin + Send + Sync, k: usize) -> usize {
-    if let Some(amount) = count_tar_file(&mut file, k).await {
+async fn count_file(mut file: impl AsyncRead + Unpin + Send, k: usize) -> usize {
+    if let Some(amount) = count_tar_file(Box::new(&mut file), k).await {
         amount
     } else if let Some(amount) = count_fasta_file(&mut file, k).await {
         amount
@@ -65,7 +69,7 @@ async fn count_file(mut file: impl AsyncRead + Unpin + Send + Sync, k: usize) ->
 }
 
 fn count_tar_file<'file>(
-    file: impl 'file + AsyncRead + Unpin + Send + Sync,
+    file: Box<dyn 'file + AsyncRead + Unpin + Send>,
     k: usize,
 ) -> Pin<Box<dyn 'file + Future<Output = Option<usize>> + Send>> {
     Box::pin(async move {
@@ -89,7 +93,7 @@ fn count_tar_file<'file>(
     })
 }
 
-async fn count_fasta_file(file: impl AsyncRead + Unpin + Send + Sync, k: usize) -> Option<usize> {
+async fn count_fasta_file(file: impl AsyncRead + Unpin + Send, k: usize) -> Option<usize> {
     let mut reader = BufReader::with_capacity(1024 * 1024, file);
     let mut sum = 0;
 
