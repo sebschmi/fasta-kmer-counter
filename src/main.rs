@@ -1,4 +1,5 @@
 use std::{
+    io::SeekFrom,
     path::{Path, PathBuf},
     pin::Pin,
 };
@@ -9,10 +10,14 @@ use log::{LevelFilter, debug};
 use simplelog::{TermLogger, TerminalMode};
 use tokio::{
     fs::{File, ReadDir, read_dir},
-    io::{AsyncRead, AsyncReadExt, BufReader},
+    io::{AsyncRead, AsyncReadExt, AsyncSeekExt, BufReader},
 };
 use tokio_stream::StreamExt;
 use tokio_tar::Archive;
+
+use crate::async_file::AsyncFile;
+
+mod async_file;
 
 #[derive(clap::Parser)]
 struct Cli {
@@ -72,20 +77,25 @@ async fn count_directory(path: &Path, mut directory: ReadDir, k: usize) -> usize
 }
 
 #[allow(clippy::manual_unwrap_or_default, clippy::manual_unwrap_or)]
-async fn count_file(path: &Path, mut file: impl AsyncRead + Unpin + Send, k: usize) -> usize {
+async fn count_file(path: &Path, mut file: impl AsyncFile, k: usize) -> usize {
     if let Some(amount) = count_tar_file(path, Box::new(&mut file), k).await {
         amount
-    } else if let Some(amount) = count_fasta_file(path, &mut file, k).await {
-        amount
     } else {
-        // If everything fails, just ignore it.
-        0
+        if file.seek(SeekFrom::Start(0)).await.is_err() {
+            return 0;
+        }
+        if let Some(amount) = count_fasta_file(path, &mut file, k).await {
+            amount
+        } else {
+            // If everything fails, just ignore it.
+            0
+        }
     }
 }
 
 fn count_tar_file<'result>(
     path: &'result Path,
-    file: Box<dyn 'result + AsyncRead + Unpin + Send>,
+    file: Box<dyn 'result + AsyncFile>,
     k: usize,
 ) -> Pin<Box<dyn 'result + Future<Output = Option<usize>> + Send>> {
     Box::pin(async move {
@@ -97,7 +107,9 @@ fn count_tar_file<'result>(
         let mut sum = 0;
 
         while let Some(Ok(file)) = entries.next().await {
-            sum += count_file(&path.join(file.path().unwrap_or_default()), file, k).await;
+            sum += count_fasta_file(&path.join(file.path().unwrap_or_default()), file, k)
+                .await
+                .unwrap_or_default();
         }
 
         if sum == 0 {
