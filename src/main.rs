@@ -30,12 +30,13 @@ struct Cli {
 async fn main() {
     let cli = Cli::parse();
 
-    TermLogger::new(
+    TermLogger::init(
         cli.log_level,
         Default::default(),
         TerminalMode::Stderr,
         Default::default(),
-    );
+    )
+    .unwrap();
 
     let mut total_count = 0;
     for input in &cli.input {
