@@ -5,4 +5,12 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.44", features = ["derive"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "fs",
+    "io-util",
+] }
+tokio-stream = "0.1.17"
+async-recursion = "1.1.1"
+tokio-tar = "0.3.1"
