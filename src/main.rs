@@ -5,6 +5,8 @@ use std::{
 
 use async_recursion::async_recursion;
 use clap::Parser;
+use log::{LevelFilter, debug};
+use simplelog::{TermLogger, TerminalMode};
 use tokio::{
     fs::{File, ReadDir, read_dir},
     io::{AsyncRead, AsyncReadExt, BufReader},
@@ -17,6 +19,9 @@ struct Cli {
     #[clap(short, long)]
     k: usize,
 
+    #[clap(long, default_value = "info")]
+    log_level: LevelFilter,
+
     #[clap(index = 1)]
     input: Vec<PathBuf>,
 }
@@ -24,6 +29,13 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+
+    TermLogger::new(
+        cli.log_level,
+        Default::default(),
+        TerminalMode::Stderr,
+        Default::default(),
+    );
 
     let mut total_count = 0;
     for input in &cli.input {
@@ -35,14 +47,18 @@ async fn main() {
 
 async fn count_path(path: impl AsRef<Path>, k: usize) -> usize {
     let path = path.as_ref();
-    if let Ok(directory) = read_dir(path).await {
+
+    let result = if let Ok(directory) = read_dir(path).await {
         count_directory(directory, k).await
     } else if let Ok(file) = File::open(path).await {
         count_file(file, k).await
     } else {
         // If everything fails, just ignore it.
         0
-    }
+    };
+
+    debug!("path {} contains {result} {k}-mers", path.display());
+    result
 }
 
 #[async_recursion]

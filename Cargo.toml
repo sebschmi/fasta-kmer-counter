@@ -14,3 +14,5 @@ tokio = { version = "1", features = [
 tokio-stream = "0.1.17"
 async-recursion = "1.1.1"
 tokio-tar = "0.3.1"
+log = "0.4.27"
+simplelog = "0.12.2"
